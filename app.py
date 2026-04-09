@@ -366,7 +366,7 @@ st.subheader("🔔 微信推送设置")
 SERVERCHAN_KEY = st.text_input("ServerChan SendKey", placeholder="sctpxxxxxxxxxxxx")
 with st.expander("📖 如何获取 SendKey？"):
     st.markdown("""
-1. 打开官网：https://sct.ftqq.com/
+1. 打开官网：https://sc3.ft07.com/
 2. 微信扫码登录
 3. 复制 **SendKey**
 4. 粘贴到上方输入框即可使用
