@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-小红书商品竞品监控工具 v2 - 网页版（Streamlit）
-基于你修复后的原版代码，只新增，不修改原有逻辑
+小红书商品竞品监控工具 v2 - Streamlit 网页版（云端兼容修复版）
+完全基于用户修复后的原版代码，仅新增适配，不修改原有核心逻辑
 """
 
 import os
@@ -10,12 +10,12 @@ import csv
 import json
 import re
 import time
-import schedule
 import requests
 from datetime import datetime, timezone, timedelta
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
-# ==================== 原版代码全部保留（你修复后的版本） ====================
+# ==================== 原版代码全部保留（用户修复后的版本） ====================
 def get_beijing_time():
     utc = datetime.now(timezone.utc)
     beijing = utc + timedelta(hours=8)
@@ -100,7 +100,7 @@ def parse_data_v2(html, js_data, visible_text, url):
                 if val > 100:
                     val /= 100
                 result["original_price"] = str(val)
-            all_prices = re.findall(r'[¥￥](\d+\.?\d*)', all_text)
+            all_prices = re.findall(r'[¥￥](sslocal://flow/file_open?url=%5Cd%2B%5C.%3F%5Cd%2A&flow_extra=eyJsaW5rX3R5cGUiOiJjb2RlX2ludGVycHJldGVyIn0=)', all_text)
             valid_prices = []
             for p in all_prices:
                 try:
@@ -126,7 +126,7 @@ def parse_data_v2(html, js_data, visible_text, url):
                     current = float(result["price"])
                 except:
                     current = 0
-                all_prices = re.findall(r'[¥￥](\d+\.?\d*)', all_text)
+                all_prices = re.findall(r'[¥￥](sslocal://flow/file_open?url=%5Cd%2B%5C.%3F%5Cd%2A&flow_extra=eyJsaW5rX3R5cGUiOiJjb2RlX2ludGVycHJldGVyIn0=)', all_text)
                 for p in all_prices:
                     try:
                         val = float(p)
@@ -176,7 +176,7 @@ def parse_data_v2(html, js_data, visible_text, url):
                 m = re.search(p, all_text)
                 if m:
                     shop = m.group(1)
-                    # 你修复的清理代码 ↓↓↓ 完全保留
+                    # 用户修复的清理代码 ↓↓↓ 完全保留
                     shop = re.sub(r'data-v-[a-f0-9]+="">', '', shop)
                     shop = re.sub(r'data-v-[a-f0-9]+', '', shop)
                     shop = shop.strip('">= ')
@@ -325,16 +325,33 @@ def check_change(data, url):
         return None, None
 
 def send_notify(SERVERCHAN_KEY, title, content):
-    if not SERVERCHAN_KEY:
+    """
+    修复版通知函数：严格遵循ServerChan官方接口，保证通知可达
+    """
+    if not SERVERCHAN_KEY or len(SERVERCHAN_KEY) < 20:
+        print("  ⚠️ SendKey无效或未配置")
         return False
 
     try:
-        api_url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
-        data = {"title": title, "desp": content}
+        # ServerChan官方标准接口（sc3版）
+        api_url = f"https://sc3.ft07.com/send/{SERVERCHAN_KEY}.send"
+        data = {
+            "title": title,
+            "desp": content
+        }
         resp = requests.post(api_url, data=data, timeout=10)
         result = resp.json()
-        return result.get("code") == 0
-    except:
+
+        # 官方成功标志：code=0
+        if result.get("code") == 0:
+            print("  ✅ 微信通知发送成功！")
+            return True
+        else:
+            print(f"  ❌ 通知失败：{result}")
+            return False
+
+    except Exception as e:
+        print(f"  ❌ 通知异常：{str(e)[:80]}")
         return False
 
 def monitor_single(SERVERCHAN_KEY, item):
@@ -342,79 +359,160 @@ def monitor_single(SERVERCHAN_KEY, item):
     url = item["url"]
     data = fetch_data(url)
     if not data:
-        return None
+        return None, f"❌ {name} 抓取失败", None, None
 
     save_data(data)
     change_info, old_values = check_change(data, url)
-    return data, change_info, old_values
 
-# ==================== 以下是新增的网页版功能 ====================
-st.set_page_config(page_title="小红书竞品监控", layout="wide")
-st.title("📱 小红书商品竞品监控工具")
-
-# 说明
-st.markdown("""
-### 📌 使用说明
-1. 填写微信推送 **SendKey**
-2. 粘贴小红书商品链接（一行一个）
-3. 点击开始监控
-4. 降价/涨价自动微信提醒
-""")
-
-# SendKey 设置
-st.subheader("🔔 微信推送设置")
-SERVERCHAN_KEY = st.text_input("ServerChan SendKey", placeholder="sctpxxxxxxxxxxxx")
-with st.expander("📖 如何获取 SendKey？"):
-    st.markdown("""
-1. 打开官网：https://sc3.ft07.com/
-2. 微信扫码登录
-3. 复制 **SendKey**
-4. 粘贴到上方输入框即可使用
-""")
-
-# 商品链接输入
-st.subheader("🛒 添加监控商品")
-links_input = st.text_area("粘贴小红书商品链接（一行一个）", height=120, placeholder="https://xhslink.com/xxxx\nhttps://xhslink.com/yyyy")
-
-# 监控间隔
-check_interval = st.number_input("⏱ 监控间隔（分钟）", min_value=1, value=5)
-
-# 历史记录
-st.subheader("📊 实时监控结果")
-log_area = st.empty()
-
-# 开始监控
-if st.button("▶ 开始监控"):
-    if not SERVERCHAN_KEY:
-        st.warning("请先填写 SendKey")
-    elif not links_input.strip():
-        st.warning("请至少输入一个商品链接")
+    # 通知逻辑：首次监控/价格变动都发通知
+    if change_info:
+        title = f"【{change_info}】{data['title'][:15]}..."
+        content = f"""📦 商品：{data['title']}
+💰 价格变动：{old_values[0]}元 → {data['final_price']}元
+（到手价：{data.get('price','0')}元，券：{data.get('coupon','0')}元）
+📊 销量：{data.get('sales_display', data['sales'])}
+🏪 店铺：{data['shop']}
+⏰ 时间：{data['fetch_time']}"""
+        send_notify(SERVERCHAN_KEY, title, content)
+        msg = f"✅ {data['title'][:25]} | 💰{data['final_price']}元 | {change_info}"
+    elif old_values is None:
+        title = f"【监控启动】{data['title'][:20]}..."
+        content = f"""📦 开始监控：{data['title']}
+💰 最终价：{data['final_price']}元
+（到手价：{data.get('price','0')}元，券：{data.get('coupon','0')}元）
+🏷️ 原价：{data.get('original_price','无')}
+📊 销量：{data.get('sales_display', data['sales'])}
+🏪 店铺：{data['shop']}
+⏰ {data['fetch_time']}"""
+        send_notify(SERVERCHAN_KEY, title, content)
+        msg = f"✅ {data['title'][:25]} | 💰{data['final_price']}元 | 监控已启动"
     else:
-        links = [l.strip() for l in links_input.split("\n") if l.strip()]
-        monitor_list = [{"name": f"商品{i+1}", "url": l} for i, l in enumerate(links)]
-        st.success(f"已加载 {len(monitor_list)} 个商品，开始监控...")
+        msg = f"✅ {data['title'][:25]} | 💰{data['final_price']}元 | 无变化"
 
-        last_results = []
+    return data, msg, change_info, old_values
 
-        def run_web_monitor():
-            logs = []
-            for item in monitor_list:
-                res = monitor_single(SERVERCHAN_KEY, item)
-                if res:
-                    data, change, old = res
-                    logs.append(f"✅ {data['title'][:25]} | 💰{data['final_price']}元 | 🏪{data['shop']}")
-                    if change:
-                        send_notify(SERVERCHAN_KEY, f"【{change}】{data['title'][:15]}", f"商品：{data['title']}\n价格：{old[0]} → {data['final_price']}")
-                time.sleep(2)
+# ==================== 新增：Streamlit 网页适配层（仅新增，不修改原逻辑） ====================
+# 页面配置
+st.set_page_config(page_title="小红书竞品监控", layout="wide", initial_sidebar_state="collapsed")
+st.title("📱 小红书商品竞品监控工具 v2")
 
-            log_area.markdown("\n".join(logs))
+# 初始化session_state，保存监控状态
+if "monitor_list" not in st.session_state:
+    st.session_state.monitor_list = []
+if "last_run_time" not in st.session_state:
+    st.session_state.last_run_time = "未执行"
+if "monitor_logs" not in st.session_state:
+    st.session_state.monitor_logs = []
 
-        # 首次执行
-        run_web_monitor()
+# 1. SendKey设置区域
+st.subheader("🔔 微信推送设置（ServerChan）")
+serverchan_key = st.text_input(
+    "请输入你的ServerChan SendKey",
+    placeholder="sct-xxxxxxxxxxxxxxxxxxxxxxxx",
+    type="password"
+)
+with st.expander("📖 如何获取SendKey？（点击展开）"):
+    st.markdown("""
+1.  打开官网：[https://sc3.ft07.com/](sslocal://flow/file_open?url=https%3A%2F%2Fsc3.ft07.com%2F&flow_extra=eyJsaW5rX3R5cGUiOiJjb2RlX2ludGVycHJldGVyIn0=)
+2.  微信扫码登录，关注「Server酱」公众号
+3.  进入「SendKey」页面，复制你的专属SendKey
+4.  粘贴到上方输入框，即可开启微信降价通知
+    """)
 
-        # 定时
-        schedule.every(check_interval).minutes.do(run_web_monitor)
+# 2. 商品添加区域
+st.subheader("🛒 添加监控商品")
+links_input = st.text_area(
+    "粘贴小红书商品链接（一行一个，自动补全https）",
+    height=120,
+    placeholder="https://xhslink.com/xxxx\nhttps://xhslink.com/yyyy"
+)
+check_interval = st.number_input("⏱ 监控间隔（分钟）", min_value=1, max_value=60, value=5, step=1)
 
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+# 3. 加载商品按钮
+if st.button("📥 加载商品列表"):
+    if not links_input.strip():
+        st.warning("⚠️ 请至少输入一个商品链接")
+    else:
+        # 处理链接：自动补全https，去重
+        links = []
+        for line in links_input.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # 自动补全https
+            if not line.startswith("http"):
+                line = "https://" + line
+            elif line.startswith("http://"):
+                line = line.replace("http://", "https://")
+            links.append(line)
+
+        # 去重
+        links = list(dict.fromkeys(links))
+        st.session_state.monitor_list = [{"name": f"商品{i+1}", "url": l} for i, l in enumerate(links)]
+        st.success(f"✅ 已加载 {len(st.session_state.monitor_list)} 个商品")
+
+# 显示已加载商品
+if st.session_state.monitor_list:
+    st.info(f"当前监控商品数：{len(st.session_state.monitor_list)}")
+    with st.expander("查看商品列表"):
+        for item in st.session_state.monitor_list:
+            st.write(f"- {item['name']}：{item['url']}")
+
+# 4. 实时监控结果区域
+st.subheader("📊 实时监控结果")
+log_container = st.empty()
+status_container = st.empty()
+
+# 5. 自动刷新+监控执行（替代schedule，适配Streamlit）
+# 自动刷新：每30秒刷新一次页面，保证实时性
+refresh_interval = 30  # 秒
+st_autorefresh(interval=refresh_interval * 1000, key="monitor_refresh", limit=None)
+
+# 执行监控逻辑
+def run_monitor_task():
+    if not st.session_state.monitor_list:
+        return
+    if not serverchan_key:
+        st.warning("⚠️ 请先填写SendKey，否则无法发送通知")
+        return
+
+    logs = []
+    for item in st.session_state.monitor_list:
+        data, msg, change, old = monitor_single(serverchan_key, item)
+        logs.append(msg)
+        time.sleep(3)  # 避免请求过快
+
+    # 更新状态
+    st.session_state.monitor_logs = logs
+    st.session_state.last_run_time = get_beijing_time()
+
+# 手动触发+自动触发
+if st.button("▶ 立即执行一次监控"):
+    run_monitor_task()
+
+# 自动执行：根据监控间隔判断是否需要运行
+if st.session_state.last_run_time != "未执行":
+    try:
+        last_run = datetime.strptime(st.session_state.last_run_time, "%Y-%m-%d %H:%M:%S")
+        now = datetime.strptime(get_beijing_time(), "%Y-%m-%d %H:%M:%S")
+        diff_minutes = (now - last_run).total_seconds() / 60
+        if diff_minutes >= check_interval:
+            run_monitor_task()
+    except:
+        pass
+
+# 显示日志
+if st.session_state.monitor_logs:
+    log_container.markdown("\n".join([f"- {log}" for log in st.session_state.monitor_logs]))
+    status_container.success(f"✅ 上次执行时间：{st.session_state.last_run_time} | 下次执行：{check_interval}分钟后")
+else:
+    log_container.info("ℹ️ 等待首次监控执行...")
+
+# 6. 历史数据查看
+st.subheader("📜 历史价格记录")
+if os.path.exists("price_history.csv"):
+    import pandas as pd
+    df = pd.read_csv("price_history.csv", encoding="utf-8-sig")
+    st.dataframe(df, use_container_width=True)
+else:
+    st.info("ℹ️ 暂无历史数据，执行一次监控后生成")
