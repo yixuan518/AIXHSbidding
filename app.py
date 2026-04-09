@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-小红书商品竞品监控工具 v2 - Streamlit 网页版（云端兼容修复版）
+小红书商品竞品监控工具 v2 - Streamlit 网页版（无依赖兼容修复版）
 完全基于用户修复后的原版代码，仅新增适配，不修改原有核心逻辑
 """
 
@@ -13,7 +13,14 @@ import time
 import requests
 from datetime import datetime, timezone, timedelta
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+
+# ==================== 自动刷新兼容处理（解决模块缺失问题） ====================
+try:
+    from streamlit_autorefresh import st_autorefresh
+    AUTOREFRESH_AVAILABLE = True
+except ImportError:
+    AUTOREFRESH_AVAILABLE = False
+    st_autorefresh = None
 
 # ==================== 原版代码全部保留（用户修复后的版本） ====================
 def get_beijing_time():
@@ -463,10 +470,12 @@ st.subheader("📊 实时监控结果")
 log_container = st.empty()
 status_container = st.empty()
 
-# 5. 自动刷新+监控执行（替代schedule，适配Streamlit）
-# 自动刷新：每30秒刷新一次页面，保证实时性
-refresh_interval = 30  # 秒
-st_autorefresh(interval=refresh_interval * 1000, key="monitor_refresh", limit=None)
+# 5. 自动刷新+监控执行（兼容streamlit-autorefresh缺失）
+# 自动刷新：如果有autorefresh就用，没有就用原生提示
+if AUTOREFRESH_AVAILABLE:
+    st_autorefresh(interval=30 * 1000, key="monitor_refresh", limit=None)
+else:
+    st.info("ℹ️ 自动刷新组件未安装，页面不会自动刷新，请手动点击「立即执行一次监控」或刷新页面")
 
 # 执行监控逻辑
 def run_monitor_task():
@@ -490,8 +499,8 @@ def run_monitor_task():
 if st.button("▶ 立即执行一次监控"):
     run_monitor_task()
 
-# 自动执行：根据监控间隔判断是否需要运行
-if st.session_state.last_run_time != "未执行":
+# 自动执行：根据监控间隔判断是否需要运行（仅autorefresh可用时生效）
+if AUTOREFRESH_AVAILABLE and st.session_state.last_run_time != "未执行":
     try:
         last_run = datetime.strptime(st.session_state.last_run_time, "%Y-%m-%d %H:%M:%S")
         now = datetime.strptime(get_beijing_time(), "%Y-%m-%d %H:%M:%S")
