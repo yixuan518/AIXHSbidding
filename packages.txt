@@ -1,3 +1,5 @@
+wget
+unzip
 libnss3
 libnspr4
 libatk1.0-0
@@ -12,3 +14,5 @@ libgbm1
 libasound2
 libatspi2.0-0
 libxshmfence1
+libdrm2
+libx11-xcb1
